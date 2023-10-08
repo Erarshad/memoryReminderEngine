@@ -2,29 +2,34 @@ const express = require('express'); //importing express
 const bodyParser = require('body-parser'); //importing body-parser
 let cron = require('node-cron');
 const db=require("./db");
-var nodemailer = require('nodemailer');
-var smtpTransport = require('nodemailer-smtp-transport');
 var moment = require('moment');
+const { json } = require('body-parser');
+const jwt = require('jsonwebtoken');//jwt
+const authenticateJWT=require("./tokenAuthenticationMiddleware.js");
+const accessTokenSecret = 'sensegrass_neobanking'; 
 
 
 const app=express();
 const port=process.env.PORT||5000;
 app.use(bodyParser.json({limit: '50mb'}));
 
-app.get("/",(req,res)=> res.send("welcome to memory app"));
-app.get("/getMemories",(req,res)=>{
-  let sql = `SELECT * FROM memories`;
+app.get("/",(req,res)=> res.send("welcome to neobanking app"));
+app.post("/getBasicDetails",authenticateJWT,(req,res)=>{
+  let body=req.body;
+  let emailId=body.email;
+  let sql = `SELECT * FROM neoBankDb where email=?`;
     
-  db.all(sql, (err, rows) => {
+  db.all(sql,[emailId], (err, rows) => {
       if (err) {
         res.send({"status":401,"message":err.message});
           throw err;
       }
- 
-   res.send(rows);
+    if(rows[0]!=null){
+    res.send(rows[0]);
+    }else{
+      res.send({"status":402,"message":`no data in db`});
+    }
 
- 
-   
   });
    
   
@@ -32,201 +37,67 @@ app.get("/getMemories",(req,res)=>{
    
 });
 
-app.post("/createMemory",(req,res)=>{
-    let body=req.body;
-    /**
-     *  {   "id":200,
-    "email":"postman@mail.com",
-    "title":"post",
-    "description":"it is from postman",
-    "eventdate":"24/05/2002 18:30",
-     "tags":"hi",
-     "image64":"",
-     "lastSentDate":"20/09/2022",
-     "dateAdded":"20/09/2022"
-}
-     */
-    let id=body.id;
-    let email=body.email;
-    let title=body.title;
-    let description=body.description;
-    let eventdate=body.eventdate;
-    let tags=body.tags;
-    let image64=body.image64;
-    let lastSentDate=body.lastSentDate;
-    let dateAdded=body.dateAdded;
-    console.log(body);
-    insertIntoDb(email,title,description,eventdate,lastSentDate,dateAdded,tags,image64,id,res,()=>{
-         //send mail on priority iF LAST sent is null
-      sendEmail(title,description,email,image64);
-      //update the last sent date
-      updateLastSentDate(moment().format('DD/MM/YYYY'),id); //
-    });
+app.post("/transactionDeduct",authenticateJWT,(req,res)=>{
+  let body=req.body;
+  let emailId=body.email;
+  let Latestamount=body.amount;
+  let transactions=JSON.stringify(body.transactions);
+  let pendingTransactions=JSON.stringify(body.pendingTransactions);
 
- 
+    
+  db.run("UPDATE neoBankDb SET wallet=?,transactionObject=?,pendingTransactionObject=? where email=?",[Latestamount,transactions,pendingTransactions,emailId], function(err) {
+    if (err) {
+     res.send({"status":401,"message":err.message});
+      return console.log(err.message);
+    }
+    // get the last insert id
+    console.log(`A row has been updated with rowid ${emailId}`);
+    console.log(transactions);
+    res.send({"status":200,"message":`transaction successfull remaing wallet amount is ${Latestamount}`});
+  });
    
-
-});
-
-
-app.post("/updateMemory",(req,res)=>{
-    let body=req.body;
-    /**
-     *  {   "id":200,
-    "email":"postman@mail.com",
-    "title":"post",
-    "description":"it is from postman",
-    "eventdate":"24/05/2002 18:30",
-     "tags":"hi",
-     "image64":"",
-     "lastSentDate":"20/09/2022",
-     "dateAdded":"20/09/2022"
-}
-     */
-    let id=body.id;
-    let email=body.email;
-    let title=body.title;
-    let description=body.description;
-    let eventdate=body.eventdate;
-    let tags=body.tags;
-    let image64=body.image64;
-    let lastSentDate=body.lastSentDate;
-    let dateAdded=body.dateAdded;
-    updateIntoDb(email,title,description,eventdate,lastSentDate,dateAdded,tags,image64,id,res);
   
-
+  
+   
 });
+app.post("/login",(req,res)=>{
+  let body=req.body;
+  let emailId=body.email;
+  let pwd=body.password;
+  let sql = `SELECT * FROM auth where email=?`;
+  db.all(sql,[emailId], (err, rows) => {
+    if (err) {
+      res.send({"status":401,"message":err.message});
+        throw err;
+    }
 
+  if(rows[0]!=null){
+   if(rows[0].email==emailId && rows[0].pwd==pwd){
+    const accessToken = jwt.sign({emailId,pwd}, accessTokenSecret);
+  
+    res.send({"status":200,"message":`login successfull`,"accessToken":accessToken});
+   }else{
+    res.send({"status":401,"message":`Please enter correct credentials`});
+   }
+  }else{
+    res.send({"status":402,"message":`no user with this email ${emailId} found, try entering other credentials`});
+  }
 
+  });
+  
+    
  
-
+  
+  
+   
+});
 
 app.listen(port,()=>console.log('running on port http://localhost:'+port));
 
 
-function insertIntoDb(email,title,description,eventdate,lastSentDate,dateAdded,tags,image64,id,res,fn){
-    db.run("INSERT INTO memories (email,title,description,eventdate,lastSentDate,dateAdded,tags,image64,id) VALUES (?,?,?,?,?,?,?,?,?)",[email,title,description,eventdate,lastSentDate,dateAdded,tags,image64,id], function(err) {
-        if (err) {
-          res.send({"status":401,"message":err.message});
-          return console.log(err.message);
-          
-        }
-        // get the last insert id
-        fn();
-        console.log(`A row has been inserted with rowid ${id}`);
-        res.send({"status":200,"message":"Memory added successfully"});
-      });
-    
- 
-}
-
-
-function updateIntoDb(email,title,description,eventdate,lastSentDate,dateAdded,tags,image64,id,res){
-    db.run("UPDATE memories SET email=?,title=?,description=?,eventdate=?,lastSentDate=?,dateAdded=?,tags=?,image64=? where id=?",[email,title,description,eventdate,lastSentDate,dateAdded,tags,image64,id], function(err) {
-        if (err) {
-         res.send({"status":401,"message":err.message});
-          return console.log(err.message);
-        }
-        // get the last insert id
-        console.log(`A row has been updated with rowid ${id}`);
-        res.send({"status":200,"message":"Memory updated successfully"});
-      });
-    
- 
-}
-
-
-cron.schedule('0 0 0 * * *', () => {
-    // console.log('will run every day at 12:00 AM');
-    fetchDataToSent();
-
-
-});
 
 
 
-
-function fetchDataToSent(){
-    let sql = `SELECT * FROM memories ORDER BY lastSentDate ASC`;
-    
-    db.all(sql, (err, rows) => {
-        if (err) {
-            throw err;
-        }
-   
-    console.log(rows[0]);
-    let  tuple=rows[0];
-     sendEmail(tuple.title,tuple.description,tuple.email,tuple.base64Data);
-     //after sending update the last sent date
-     updateLastSentDate(moment().format('DD/MM/YYYY'),tuple.id);
-
-   
-     
-    });
-
-
-   
-}
-
-function updateLastSentDate(updatedLastSentDate,id){
-  db.run("UPDATE memories SET lastSentDate=? where id=?",[updatedLastSentDate,id], function(err) {
-    if (err) {
-     
-      return console.log(err.message);
-    }
-    // get the last insert id
-    console.log(`A cell has been updated with rowid ${id}`);
-  
-  });
-
-
-}
-
-function sendEmail(sub,description,to,base64Data){
-
-   
-
-    var transporter = nodemailer.createTransport(smtpTransport({
-        service: 'gmail',
-        host: 'smtp.gmail.com',
-        auth: {
-          user: 'mo303543@gmail.com',
-          pass: 'rjxwldrncgbbhcuc'
-        }
-      }));
-      console.log(base64Data);
-      var mailOptions = base64Data.length>0?
-      {
-        from: 'mo303543@gmail.com',
-        to: to,
-        subject: sub,
-       // html:"<p>"+description+"</p>"+"<br>"+ base64Data!=null?"<img src=\"data:image/png;base64,"+base64Data+"\"/>":""
-         text:description,
-         
-         attachments:[{
-          path:'data:image/png;base64,'+base64Data
-          }
-         ]
-
-      }:{
-        from: 'mo303543@gmail.com',
-        to: to,
-        subject: sub,
-       // html:"<p>"+description+"</p>"+"<br>"+ base64Data!=null?"<img src=\"data:image/png;base64,"+base64Data+"\"/>":""
-         text:description,
-         
-
-      }
-      
-      transporter.sendMail(mailOptions, function(error, info){
-        if (error) {
-          console.log(error);
-        } else {
-          console.log('Email sent: ' + info.response);
-        }
-      }); 
-
-}
 
 
   
