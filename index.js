@@ -41,8 +41,8 @@ app.post("/transactionDeduct",authenticateJWT,(req,res)=>{
   let body=req.body;
   let emailId=body.email;
   let Latestamount=body.amount;
-  let transactions=JSON.stringify(body.transactions);
-  let pendingTransactions=JSON.stringify(body.pendingTransactions);
+  let transactions=body.transactions;
+  let pendingTransactions=body.pendingTransactions;
 
     
   db.run("UPDATE neoBankDb SET wallet=?,transactionObject=?,pendingTransactionObject=? where email=?",[Latestamount,transactions,pendingTransactions,emailId], function(err) {
